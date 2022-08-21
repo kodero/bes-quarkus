@@ -16,7 +16,7 @@ public class Pager implements Serializable {
 
     private int page = 1;
 
-    private int numOfRecords = 0;
+    private long numOfRecords = 0;
 
     public Pager() {
     }
@@ -26,9 +26,8 @@ public class Pager implements Serializable {
     }
 
 
-    public Pager(int pageSize, int page, int numOfRecords) {
+    public Pager(int pageSize, int page, long numOfRecords) {
         this.pageSize = pageSize;
-        //this.page = page;
         setPage(page);
         this.numOfRecords = numOfRecords;
     }
@@ -52,7 +51,7 @@ public class Pager implements Serializable {
         this.page = page;
     }
 
-    public int getNumOfRecords() {
+    public long getNumOfRecords() {
         return numOfRecords;
     }
 
@@ -82,12 +81,12 @@ public class Pager implements Serializable {
         return (getPage() - 1) * getPageSize();
     }
 
-    public int getIndexEnd() {
+    public long getIndexEnd() {
         int firstIndex = getIndexBegin();
         int pageIndex = getPageSize() - 1;
-        int lastIndex = getNumOfRecords() - 1;
-        final int min = Math.min(firstIndex + pageIndex, lastIndex);
-        return min > 0 ? min : 0;
+        long lastIndex = getNumOfRecords() - 1;
+        final long min = Math.min((long)firstIndex + pageIndex, lastIndex);
+        return Math.max(min, 0);
     }
 
     public boolean isPreviousPageAvailable() {
@@ -107,7 +106,7 @@ public class Pager implements Serializable {
         //return page * pageSize + 1;
     }
 
-    public int getLastRecord() { //
+    public long getLastRecord() { //
         return (page * pageSize + pageSize) > numOfRecords
                 ? numOfRecords
                 : page * pageSize + pageSize;

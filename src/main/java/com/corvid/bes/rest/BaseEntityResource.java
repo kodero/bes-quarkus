@@ -15,6 +15,7 @@ import com.corvid.bes.validation.ValidationMethod;
 import com.corvid.bes.validation.ValidatorClass;
 import com.corvid.genericdto.data.gdto.GenericDTO;
 import com.corvid.genericdto.util.LocaleAwareMessageInterpolator;
+import com.corvid.genericdto.util.LoggingUtil;
 import com.corvid.genericdto.util.PropertyUtils;
 import com.corvid.genericdto.util.ReflectionUtils;
 import com.corvid.genericdto.util.Reflections;
@@ -81,7 +82,7 @@ import javax.ws.rs.core.UriInfo;
 
 import org.apache.commons.lang.StringUtils;
 import org.hibernate.Session;
-//import org.jboss.resteasy.spi.HttpResponse;
+import org.jboss.logging.Logger.Level;
 
 /**
  * <p>
@@ -131,6 +132,14 @@ import org.hibernate.Session;
 @RequestScoped
 public abstract class BaseEntityResource<T extends AbstractModelBase> {
 
+    private static final String ERROR_NODE_NAME = "error";
+
+    private static final String DEFAULT_PAGE = "1";
+
+    private static final String DEFAULT_PAGE_SIZE = "25";
+
+    private static final int MAX_NO_WHERE_CLAUSE = 16;
+
     @PersistenceContext
     EntityManager entityManager;
 
@@ -171,6 +180,12 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
 
     protected LocaleAwareMessageInterpolator interpolator;
 
+    /*
+     * Error codes
+     */
+
+    
+
     protected BaseEntityResource() {
     }
 
@@ -186,7 +201,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
 
     @PostConstruct
     public void init() {
-        log.info("*********** init ****************");
+        LoggingUtil.log(BaseEntityResource.class, Level.INFO, "*********** init ****************");
         // Create a bean validator and check for issues.
         interpolator = new LocaleAwareMessageInterpolator();
         //set the headers
@@ -224,11 +239,16 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
             builder = createValidationResponse(ite);
         } catch (Exception e) {
             e.printStackTrace();
-            Map<String, String> responseObj = new HashMap<>();
-            responseObj.put("error", StackTraceUtil.getStackTrace(e));
-            builder = Response.status(Response.Status.BAD_REQUEST).entity(responseObj);
+            builder = Response.status(Response.Status.BAD_REQUEST).entity(createErrorResponse(e, "100"));
         }
         return builder.build();
+    }
+
+    private Map<String, String> createErrorResponse(Exception e, String errorCode){
+        Map<String, String> responseObj = new HashMap<>();
+        responseObj.put("errorCode", errorCode);
+        responseObj.put(ERROR_NODE_NAME, StackTraceUtil.getStackTrace(e));
+        return responseObj;
     }
 
     @DELETE
@@ -239,7 +259,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
         Field collectionField = Reflections.getField(entityClass, collectionName);
         if (collectionField == null) {
             Map<String, String> responseObj = new HashMap<>();
-            responseObj.put("error", "The collection field ' " + collectionName + " ' does not exist on the entity ' " + entityClass.getCanonicalName() + "'");
+            responseObj.put(ERROR_NODE_NAME, "The collection field ' " + collectionName + " ' does not exist on the entity ' " + entityClass.getCanonicalName() + "'");
             return Response.status(Response.Status.BAD_REQUEST).entity(responseObj).build();
         }
         Type type = collectionField.getGenericType();
@@ -251,19 +271,22 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
     }
 
     protected Response.ResponseBuilder createValidationResponse(ValidationException e) {
-        Response.ResponseBuilder builder;Map<String, String> responseObj = new HashMap<>();
-        responseObj.put("Validation error", e.getMessage());
+        Response.ResponseBuilder builder;
+        Map<String, String> responseObj = new HashMap<>();
+        responseObj.put("validationError", e.getMessage());
         builder = Response.status(Response.Status.CONFLICT).entity(responseObj);
         return builder;
     }
 
     protected Response.ResponseBuilder createValidationResponse(InvocationTargetException ite) {
-        Response.ResponseBuilder builder;Map<String, String> responseObj = new HashMap<>();
-        responseObj.put("error", ite.getCause().getMessage());
+        Response.ResponseBuilder builder;
+        Map<String, String> responseObj = new HashMap<>();
+        responseObj.put(ERROR_NODE_NAME, ite.getCause().getMessage());
         builder = Response.status(Response.Status.CONFLICT).entity(responseObj);
         return builder;
     }
 
+    @SuppressWarnings("unchecked")
     private Class<AbstractModelBase> getGenericParams(Type type, Class<AbstractModelBase> clzz) {
         if (type instanceof ParameterizedType) {
             ParameterizedType pType = (ParameterizedType) type;
@@ -299,27 +322,26 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     public List<GenericDTO> getAll(@Context UriInfo uriInfo,
-                                   @QueryParam("pageSize") @DefaultValue("25") int pageSize,
-                                   @QueryParam("page") @DefaultValue("1") int pageNum,
+                                   @QueryParam("pageSize") @DefaultValue(DEFAULT_PAGE_SIZE) int pageSize,
+                                   @QueryParam("page") @DefaultValue(DEFAULT_PAGE) int pageNum,
                                    @QueryParam("orderBy") List<String> orderBy,
                                    @QueryParam("fields") String fieldList,
                                    @QueryParam("where") List<String> where) {
-        int numOfRecords = count(where);
+        long numOfRecords = count(where);
         final Pager pager = new Pager(pageSize, pageNum, numOfRecords);
-        pager.setNumOfRecords(numOfRecords);
-        log.info(" pager " + pager);
-        log.info(" order by " + orderBy);
-        log.info(" fields " + fieldList);
-        log.info(" UriInfo#pathParameters " + uriInfo.getPathParameters());
+        LoggingUtil.log(this.getClass(), Level.INFO, String.format("Pager [%s]", pager));
+        LoggingUtil.log(this.getClass(), Level.INFO, String.format("Order by [%s]", orderBy));
+        LoggingUtil.log(this.getClass(), Level.INFO, String.format("Fields [%s]", fieldList));
+        LoggingUtil.log(this.getClass(), Level.INFO, String.format("UriInfo#pathParameters [%s]", uriInfo.getPathParameters()));
         String[] fields = fieldList == null ? genericDTOUtil.makeDefaultSelectionFields(entityClass) : fieldList.split(",");
 
-        return getAll(pager, orderBy, fields, uriInfo.getQueryParameters(), where);
+        return getAll(pager, orderBy, fields, where);
     }
 
+    @SuppressWarnings("unchecked")
     public List<GenericDTO> getAll(final Pager pager,
                                    List<String> orderBy,
                                    String[] fields,
-                                   MultivaluedMap<String, String> queryParameters,
                                    List<String> where) {
 
         final CriteriaBuilder cb = getEntityManager().getCriteriaBuilder();
@@ -328,19 +350,19 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
         Predicate[] predicates = extractPredicates(where, cb, root);
         List<Selection<?>> selections = getSelections(fields, root);
 
-        log.info("created selections size " + selections.size());
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Created selections size: [%s]", selections.size()));
         cq.multiselect(selections).where(predicates);
         List<Order> od = getOrders(orderBy, cb, root, false);
         cq.orderBy(od);
         //execute query
         Query q = getEntityManager().createQuery(cq);
-        log.info(" max results " + pager.getIndexEnd() + ", first result " + pager.getIndexBegin());
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Max results [%s], first result [%s]", pager.getIndexEnd(), pager.getIndexBegin()));
         q.setMaxResults(pager.getPageSize());
         q.setFirstResult(pager.getIndexBegin());
         List<Tuple> tupleResult = q.getResultList();
-        log.info("results obtained , size " + tupleResult.size());
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Results obtained, size [%s]", tupleResult.size()));
         //format the output
-        List<GenericDTO> dtos = Collections.EMPTY_LIST;
+        List<GenericDTO> dtos = Collections.emptyList();
         try {
             dtos = genericDTOUtil.getGenericDTOs(fields, tupleResult, entityClass);
         } catch (Exception e) {
@@ -358,16 +380,6 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
         response.putHeader(Pager.END, String.format("%s", pager.getIndexEnd() + 1));
     }
 
-    private List<GenericDTO> getGenericDTOs2(String[] fields, List<Object[]> tupleResult) throws NoSuchFieldException {
-        List<GenericDTO> dtos = new ArrayList<>();
-        for (Object[] row : tupleResult) {
-            //dumpRow(row);
-            GenericDTO dto = genericDTOUtil.getGenericDTO(entityClass, fields, row, null);
-            dtos.add(dto);
-        }
-        return dtos;
-    }
-
     /**
      * Dotting added to orderBy e.g  orderBy=user:login
      * NOTE : its one level deep
@@ -377,35 +389,34 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
      * @param root
      * @return
      */
-    private List<Order> getOrders(List<String> orderBy, CriteriaBuilder cb, Root<T> root, Boolean excludeDefaultOrder) {
-        List<String> _orderBy = new ArrayList<>(orderBy);//make a copy
+    private List<Order> getOrders(List<String> orderBy, CriteriaBuilder cb, Root<T> root, boolean excludeDefaultOrder) {
+        List<String> orderByLocal = new ArrayList<>(orderBy);//make a copy
         if(!excludeDefaultOrder) {
-            _orderBy.add("createdAt");//add this to preserve the insertion order
+            orderByLocal.add("createdAt");//add this to preserve the insertion order
         }
-        List<Order> od = new ArrayList<>(_orderBy.size());
-        for (String orderDesc : _orderBy) {
-            log.info("got order------------------------" + orderDesc);
+        List<Order> od = new ArrayList<>(orderByLocal.size());
+        for (String orderDesc : orderByLocal) {
+            
             if (orderDesc.contains(":")) {
                 String[] rels = orderDesc.split(":");
-                //root.get(rels[0]).get(rels[1]);
                 od.add(rels[0].startsWith("-") ? cb.desc(root.get(rels[0].substring(1)).get(rels[1])) :
                         cb.asc(root.get(rels[0]).get(rels[1])));
             } else {
                 od.add(orderDesc.startsWith("-") ? cb.desc(root.get(orderDesc.substring(1))) : cb.asc(root.get(orderDesc)));
             }
         }
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Orders---------------[%s]", od));
         return od;
     }
 
     protected List<Selection<?>> getSelections(String[] fields, Root<T> root) {
-        log.info(" the fields in selection " + Arrays.asList(fields) + " number of fields " + fields.length);
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("The fields in selection [%s], number of fields [%s]", Arrays.asList(fields), fields.length));
         List<Selection<?>> selections = new ArrayList<>(fields.length);
         Map<String, Join<Object, Object>> existingJoins = new HashMap<>();
         for (String field : fields) {
-            log.info("field name " + field);
+            LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Field name [%s]", field));
             if (field.contains(":")) {
-                //joins
-                //wfTask:owner<firstName;lastName>
+                //joins: wfTask:owner<firstName;lastName>
                 String[] rels = field.split(":");
                 Join<Object, Object> currentJoin = existingJoins.containsKey(rels[0])? existingJoins.get(rels[0]) : root.join(rels[0], JoinType.LEFT);
                 existingJoins.put(rels[0], currentJoin);
@@ -416,8 +427,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
                     final int endIndex = relationRest.indexOf(">");
                     String[] attributes = relationRest.substring(startIndex + 1, endIndex).split(";");
                     String relationName = relationRest.substring(0, startIndex);
-                    //TODO specify attributes in the join query
-                    log.info(" relation name " + relationName + " attributes " + Arrays.asList(attributes));
+                    LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Relation name [%s], attributes [%s]", relationName, Arrays.asList(attributes)));
                     Path<Object> p = currentJoin.join(relationName, JoinType.LEFT);
                     //selections.add(p);
                     if(attributes.length == 0) {
@@ -427,16 +437,17 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
                     for (String attributeName : attributes) {
                         if (attributeName.contains("[")) {
                             //owner[firstName#lastName]
-                            final int si = attributeName.indexOf("["), ei = attributeName.indexOf("]");
+                            final int si = attributeName.indexOf("[");
+                            final int ei = attributeName.indexOf("]");
                             String[] relationAttrs = attributeName.substring(si + 1, ei).split("#");
                             String relationAttrName = attributeName.substring(0, si);
-                            //TODO specify attributes in the join query
-                            log.info("Relation name " + relationAttrName + " attributes " + Arrays.asList(relationAttrs));
-                            log.info("Current Join " + currentJoin);
-                            Join<Object, Object> $join = currentJoin.join(relationName, JoinType.LEFT);
-                            Path<Object> $objectPath = $join.join(relationAttrName, JoinType.LEFT);
-                            for (String $attributeName : relationAttrs) {
-                                selections.add($objectPath.get($attributeName));
+                            //TODO1 specify attributes in the join query
+                            LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Relation name [%s], attributes [%s]", relationAttrName, Arrays.asList(relationAttrs)));
+                            LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Current Join [%s]", currentJoin));
+                            Join<Object, Object> join = currentJoin.join(relationName, JoinType.LEFT);
+                            Path<Object> objectPath = join.join(relationAttrName, JoinType.LEFT);
+                            for (String joinAttributeName : relationAttrs) {
+                                selections.add(objectPath.get(joinAttributeName));
                             }
                         }else{
                             selections.add(p.get(attributeName));
@@ -453,19 +464,18 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
         return selections;
     }
 
-    public int count(List<String> where) {
+    public long count(List<String> where) {
         return count(where, entityClass);
     }
 
-    public int count(List<String> where, Class entityClass) {
+    public long count(List<String> where, Class<T> entityClass) {
         CriteriaBuilder criteriaBuilder = getEntityManager().getCriteriaBuilder();
         CriteriaQuery<Long> criteriaQuery = criteriaBuilder.createQuery(Long.class);
-        Root root = criteriaQuery.from(entityClass);
+        Root<T> root = criteriaQuery.from(entityClass);
         criteriaQuery.select(criteriaBuilder.count(root));
         Predicate[] predicates = extractPredicates(where, criteriaBuilder, root);
         criteriaQuery.where(predicates);
-        int count = getEntityManager().createQuery(criteriaQuery).getSingleResult().intValue();
-        return count;
+        return getEntityManager().createQuery(criteriaQuery).getSingleResult().longValue();
     }
 
     /**
@@ -480,9 +490,9 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
     @javax.ws.rs.Path("/count")
     @Produces(MediaType.APPLICATION_JSON)
     public Map<String, Long> getCount(@Context UriInfo uriInfo, @QueryParam("where") List<String> where) {
-        int count  = count(where, entityClass);
+        long count  = count(where, entityClass);
         Map<String, Long> result = new HashMap<>();
-        result.put("count", new Long(count));
+        result.put("count", count);
         return result;
     }
 
@@ -525,23 +535,23 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
 
         List<String> whereList = where; //copy into a local variable, don't modify the original
         if (whereList == null || whereList.isEmpty()) {
-            log.info(" no where clause ...");
+            LoggingUtil.log(this.getClass(), Level.DEBUG, "No where clause specified...");
             return new Predicate[]{};
         }
 
-        log.info(" processing where list ' " + whereList + "'");
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Processing where list [%s]", whereList));
         List<Predicate> predicates = new ArrayList<>();
         //?[where=<field>,<comparator>,<value>]*
         //?[where=<field>,<comparator>,<value>|<field>,<comparator>,<value>]
         for (String whereParam : whereList) {
-            log.info(" the current where clause " + whereParam);
+            LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("The current where clause [%s]", whereParam));
             String[] p = whereParam.split(",");
-            log.info(" the fields ' " + Arrays.asList(p) + "' , size of p " + p.length);
+            LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("The fields [%s], size of p [%s]", Arrays.asList(p), p.length));
             //todo add validations here
             //[where=<field>,<comparator>,<value>|<field>,<comparator>,<value>]
             String[] clauses = whereParam.split("\\|");
-            log.info("Where param ; " + whereParam + " has clauses  " + clauses.length);
-            int MAX_NO_WHERE_CLAUSE = 16;
+            LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Where param; [%s], has clauses [%s]", whereParam, clauses.length));
+            
             if (clauses.length > MAX_NO_WHERE_CLAUSE) {
                 //sanity check prevent denial of service attack
                 throw new WebApplicationException("Max number of OR queries for where clause is , ' " + MAX_NO_WHERE_CLAUSE + "'", Response.Status.BAD_REQUEST);
@@ -551,7 +561,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
                 List<Predicate> currentPredicates = new ArrayList<>();
                 //<field>,<comparator>,<value>
                 clause = clause.trim();
-                log.info("current clause : "  + clause);
+                LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Current clause: [%s]", clause));
                 final String[] split = clause.split(",");
                 String[] clauseParts = new String[split.length];
                 System.arraycopy(split, 0, clauseParts, 0, clauseParts.length);
@@ -564,10 +574,11 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
             allPredicates.toArray(pred);
             predicates.add(criteriaBuilder.or(pred));
         }
-        log.info(" collected predicates " + predicates);
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Collected predicates [%s]", predicates));
         return predicates.toArray(new Predicate[predicates.size()]);
     }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private void convertClausePredicate(CriteriaBuilder criteriaBuilder, Root<T> root, List<Predicate> predicates, String whereParam, String[] p, String fieldPath) {
         if (fieldPath.isEmpty()) {
             throw new WebApplicationException("Invalid path for where request, ' " + fieldPath + "'", Response.Status.BAD_REQUEST);
@@ -576,7 +587,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
         //validate path expression
         Path<?> path = getPath(root, fieldPath);
         Class<?> pathClass = path.getJavaType();
-        log.info(" the path " + path + " path java type " + path.getJavaType().getName());
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("The path [%s], path java type [%s]", path, path.getJavaType().getName()));
         String comparator = p[1];
         ConversionManager conversionManager = ConversionManager.getDefaultManager();
         BasicTypeHelperImpl typeHelper = BasicTypeHelperImpl.getInstance();
@@ -589,7 +600,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
             case "<=": {
                 //the value must be numeric and field also needs to be numeric
                 if (p.length != 3) {
-                    throw new WebApplicationException("No value specified for where request, ' " + whereParam + "'", Response.Status.BAD_REQUEST);
+                    throw new WebApplicationException("No value specified for where request, '" + whereParam + "'", Response.Status.BAD_REQUEST);
                 }
                 String value = p[2];
                 //if("loggedInUser".equalsIgnoreCase(value)) value = userService.currentUser().getId() + ""; //get the real value of the psuedo value loggedInUser
@@ -599,13 +610,13 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
                     typedValue = conversionManager.convertObject(value, pathClass);
                 } catch (ConversionException e) {
                     e.printStackTrace();
-                    throw new WebApplicationException("The specified value '" + value + "'" +
+                    throw new WebApplicationException("The specified value: '" + value + "'" +
                             "is incompatible with the target type '" + pathClass.getName() + "', in the request  " + whereParam + "'", Response.Status.BAD_REQUEST);
                 }
-                log.info(" the typed value parameter " + typedValue);
+                LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("The typed value parameter [%s]", typedValue));
                 //pathClass || typedValue must be numeric (since they r the same , we don't need to check both)
                 final Class parameterClass = typeHelper.getJavaClass(typedValue);
-                log.info(" parameter class " + parameterClass);
+                LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Parameter class [%s]", parameterClass));
                 if (typeHelper.isNumericType(parameterClass) || typeHelper.isDateClass(parameterClass)) {
                     switch (comparator) {
                         case "=":
@@ -625,7 +636,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
                             if (typeHelper.isNumericType(parameterClass)) {
                                 predicates.add(criteriaBuilder.ge((Expression<? extends Number>) path, (Number) typedValue));
                             } else if (typeHelper.isDateClass(parameterClass)) {
-                                System.out.print("get ======" + new SimpleDateFormat("yyyy-MM-dd").format(typedValue));
+                                LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Get ======[%s]", new SimpleDateFormat("yyyy-MM-dd").format(typedValue)));
                                 predicates.add(criteriaBuilder.greaterThanOrEqualTo((Expression<? extends Comparable>) path, (Comparable) typedValue));
                             }
                             break;
@@ -640,28 +651,24 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
                             if (typeHelper.isNumericType(parameterClass)) {
                                 predicates.add(criteriaBuilder.le((Expression<? extends Number>) path, (Number) typedValue));
                             } else if (typeHelper.isDateClass(parameterClass)) {
-                                System.out.print("get =<=====" + new SimpleDateFormat("yyyy-MM-dd").format(typedValue));
+                                LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Get ======[%s]", new SimpleDateFormat("yyyy-MM-dd").format(typedValue)));
                                 predicates.add(criteriaBuilder.lessThanOrEqualTo((Expression<? extends Comparable>) path, (Comparable) typedValue));
                             }
                             break;
+                        default:
+                        throw new WebApplicationException("Unknown comparator, '" + comparator + "'", Response.Status.BAD_REQUEST);
                     }
                 } else if (comparator.compareTo("=") == 0 && typeHelper.isEnumType(parameterClass)) {
-                    log.info("we have an enum value, class ' " + parameterClass + "'");
                     predicates.add(criteriaBuilder.equal(path, typedValue));
                 } else if (comparator.compareTo("!=") == 0 && typeHelper.isEnumType(parameterClass)) {
-                    log.info("we have an enum value, class ' " + parameterClass + "'");
                     predicates.add(criteriaBuilder.notEqual(path, typedValue));
                 } else if (comparator.compareTo("=") == 0 && typeHelper.isStringType(parameterClass)) {
-                    log.info("we have a string value, class ' " + parameterClass + "'");
                     predicates.add(criteriaBuilder.equal(path, typedValue));
                 } else if (comparator.compareTo("=") == 0 && typeHelper.isBooleanType(parameterClass)) {
-                    log.info("we have a boolean value, class ' " + parameterClass + "'");
                     predicates.add(criteriaBuilder.equal(path, typedValue));
                 } else if (comparator.compareTo("!=") == 0 && typeHelper.isBooleanType(parameterClass)) {
-                    log.info("we have a boolean value, class ' " + parameterClass + "'");
                     predicates.add(criteriaBuilder.notEqual(path, typedValue));
                 } else if (comparator.compareTo("!=") == 0 && typeHelper.isStringType(parameterClass)) {
-                  log.info("we have a string value, class ' " + parameterClass + "'");
                   predicates.add(criteriaBuilder.notEqual(path, typedValue));
                 } else {
                     throw new WebApplicationException("The specified value '" + value + "' , of type '" + parameterClass + ", " +
@@ -672,9 +679,8 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
 
             case "LIKE":
             case "NOT_LIKE": {
-                log.info(" LIKE comparator , p array => " + Arrays.asList(p));
                 if (p.length != 3) {
-                    throw new WebApplicationException("No value specified for where request, ' " + whereParam + "'", Response.Status.BAD_REQUEST);
+                    throw new WebApplicationException("No value specified for where request, '" + whereParam + "'", Response.Status.BAD_REQUEST);
                 }
                 String value = p[2];
                 //path must be of  type Path<String>
@@ -687,8 +693,8 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
                         case "NOT_LIKE":
                             predicates.add(criteriaBuilder.notLike((Expression<String>) path, value));
                             break;
+                        default:
                     }
-
 
                 } else {
                     throw new WebApplicationException("LIKE & NOT_LIKE comparator are supported only for String " +
@@ -700,7 +706,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
             //name in ( 'A', 'B', 'C', 'D')
             case "IN":
             case "NOT_IN": {
-                log.info(" IN/NOT_IN comparator , p array => " + Arrays.asList(p));
+                LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("IN/NOT_IN comparator, p array => [%s]", Arrays.asList(p)));
                 if (p.length != 3) {
                     throw new WebApplicationException("No value specified for where request, ' " + whereParam + "'", Response.Status.BAD_REQUEST);
                 }
@@ -708,7 +714,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
                 //check the path
                 if (typeHelper.isNumericType(pathClass) || typeHelper.isDateClass(pathClass) || typeHelper.isEnumType(pathClass) || typeHelper.isStringType(pathClass)) {
                     String value = p[2];
-                    log.info(" IN comparator, value ' " + value + " ' ");
+                    LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("IN comparator, value [%s]", value));
                     int startIndex = value.indexOf("(");
                     int endIndex = value.indexOf(")");
                     String[] values = value.substring(startIndex + 1, endIndex).split(";");
@@ -726,7 +732,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
                                     "is incompatible with the target type '" + pathClass.getName() + "', in the request  " + whereParam + "'", Response.Status.BAD_REQUEST);
                         }
                     }
-                    log.info(" the typed value parameters " + typedValues);
+                    LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("The typed value parameters [%s]", typedValues));
                     switch (comparator) {
                         case "IN":
                             predicates.add(path.in(typedValues));
@@ -734,6 +740,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
                         case "NOT_IN":
                             predicates.add(path.in(typedValues).not());
                             break;
+                        default:
                     }
                 } else {
                     throw new WebApplicationException("IN & NOT_IN comparator are supported only for Numeric & Date " +
@@ -743,7 +750,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
             }
             case "IS":
             case "IS_NOT": {
-                log.info(" IS/IS_NOT comparator , p array => " + Arrays.asList(p));
+                LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("IS/IS_NOT comparator, p array => [%s]", Arrays.asList(p)));
                 if (p.length != 3) {
                     throw new WebApplicationException("No value specified for where request, ' " + whereParam + "'", Response.Status.BAD_REQUEST);
                 }
@@ -751,7 +758,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
                 if (value.trim().isEmpty()) {
                     throw new WebApplicationException("No parameter specified for where request, ' " + whereParam + "'", Response.Status.BAD_REQUEST);
                 }
-                log.info(" the value parameter " + value);
+                LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("The value parameter [%s]", value));
                 //we support NULL,NOT_NULL,
                 switch (value.toUpperCase().trim()) {
                     case "NULL":
@@ -783,7 +790,6 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
         Path<?> p = path.get(name);
 
         return getPath(p, StringUtils.substringAfter(propertyPath, PropertyUtils.PROPERTY_SEPARATOR));
-
     }
 
     /**
@@ -797,6 +803,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
     @GET
     @javax.ws.rs.Path("/{id:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}}")
     @Produces(MediaType.APPLICATION_JSON)
+    @SuppressWarnings("unchecked")
     public Response getSingleInstance(@Context UriInfo uriInfo,
                                       @PathParam("id") String id,
                                       @QueryParam("fields") String fieldList,
@@ -816,12 +823,12 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
         final TypedQuery<Tuple> query = getEntityManager().createQuery(cq);
         final List<Tuple> tuples = query.getResultList();
 
-        if (tuples.size() == 0) {
+        if (tuples.isEmpty()) {
             throw new WebApplicationException(Response.Status.NOT_FOUND);
         }
         GenericDTO dto = genericDTOUtil.getGenericDTO(entityClass, fields, tuples.get(0).toArray(), null);
         T entity = gService.find(id, entityClass);
-        log.info("collections param " + collectionsList);
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Collections param [%s]", collectionsList));
         if (collectionsList != null) {
             //@OneToMany
             //private Collection<GeoCity> geoCities;
@@ -831,134 +838,142 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
             int start = 0;
             int firstClosingBrace = 0;
             if (collectionsList.contains("(")) {
-                for (; firstClosingBrace < length; ) {
+                while (firstClosingBrace < length ) {
                     firstClosingBrace = collectionsList.indexOf(")", start);
                     if (firstClosingBrace < 0) break;
                     firstClosingBrace += 1;
-                    System.out.println("closing " + firstClosingBrace);
+                    LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Closing [%s]", firstClosingBrace));
                     String substring = collectionsList.substring(start, firstClosingBrace);
-                    System.out.println(substring);
+                    LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Substring [%s]", substring));
                     colls.add(substring);
-                    start = firstClosingBrace + 1; //the ,
+                    start = firstClosingBrace + 1;
                 }
             }
-            System.out.println("collection string " + colls + " colls size " + colls.size());
+            LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Collection string [%s], colls size [%s]", colls, colls.size()));
             //try see if we have collectionsOrderBy, something that looks like below
             //collectionsOrderBy=items1|-date,product.name&collectionsOrderBy=items2|name,age
             Map<String, String[]> collectionOrders = new HashMap<>();
             List<String> collectionOrderList = uriInfo.getQueryParameters().get("collectionsOrderBy");
-            if (collectionOrderList != null) {
-                if(!collectionOrderList.isEmpty()){
-                    //now process the order by
-                    for(String collectionOrder : collectionOrderList){
-                        String[] orderArgs = collectionOrder.split("\\|");
-                        log.info("orderArgs : " + Arrays.asList(orderArgs));
-                        String collName = orderArgs[0];
-                        String[] orderFields = orderArgs[1].split(",");
-                        collectionOrders.put(collName, orderFields);
-                    }
+            if (collectionOrderList != null && !collectionOrderList.isEmpty()) {
+                //now process the order by
+                for(String collectionOrder : collectionOrderList){
+                    String[] orderArgs = collectionOrder.split("\\|");
+                    LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("OrderArgs : [%s]", Arrays.asList(orderArgs)));
+                    String collName = orderArgs[0];
+                    String[] orderFields = orderArgs[1].split(",");
+                    collectionOrders.put(collName, orderFields);
                 }
             }
-            log.info("The collection order map : " + collectionOrders);
+            LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("The collection order map : [%s]", collectionOrders));
 
             String[] collectionFields = colls.toArray(new String[]{});
-            log.info("FIELDS " + Arrays.asList(collectionFields) + " fields size " + collectionFields.length);
+            LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("FIELDS [%s], fields size [%s]", Arrays.asList(collectionFields), collectionFields.length));
             for (String collectionField : collectionFields) {
+                ReturnTuple<String, String[]> tuple = extractRelationNameAndFields(collectionField);
                 //invoiceLines(x,y,z)
-                String[] childFields = null;
-                String relationName = null;
-                if (collectionField.contains("(")) {
-                    log.info("collectionField " + collectionField);
-                    int startIndex = collectionField.indexOf("(");
-                    int endIndex = collectionField.lastIndexOf(")");
-                    relationName = collectionField.substring(0, startIndex);
-                    log.info("RELATION NAME " + relationName);
-                    log.info(" START INDEX " + startIndex + " END " + endIndex);
-                    final String substring = collectionField.substring(startIndex + 1, endIndex);
-                    System.out.println("subs " + substring);
-                    //id,index,name,wfTask:owner<firstName;lastName>
-                    childFields = substring.substring(0).split(",");
-                }
-                log.info("RELATION FIELDS " + Arrays.asList(childFields) + " size " + childFields.length);
-                //get the relation class
+                String relationName = tuple.getFirst();
+                String[] childFields = tuple.getSecond();
                 Field relationField = Reflections.getField(entityClass, relationName);
                 //ha, note that fieldType is a generic collection, we need the contained element
                 //Collection<GeoCity> ww....
                 Type type = relationField.getGenericType();
-                if (type instanceof ParameterizedType) {
-                    ParameterizedType pType = (ParameterizedType) type;
-                    Type arr = pType.getActualTypeArguments()[0];
-                    Class<?> childClazz = (Class<?>) arr;
-                    if (childFields == null) {
-                        log.info(" no child collection fields specified, we manufacture default list");
-                        childFields = genericDTOUtil.makeDefaultSelectionFields(childClazz);
-                        log.info(" manufactured fields " + Arrays.asList(childFields));
-                    }
-                    //get the name of the corresponding @ManyToOne field on the child
-                    //we now proceed to create the query for said child
-                    final String parentClassName = entityClass.getSimpleName();
-                    final String mappedByName = (relationField.isAnnotationPresent(OneToMany.class))? (relationField.getAnnotation(OneToMany.class)).mappedBy() : null;
-                    final String parentIdPath = parentClassName.substring(0, 1).toLowerCase() + parentClassName.substring(1);
-                    String parentId = (String) dto.get("id").getValue();
-                    log.info(" Child Class " + childClazz.getName() + " , Parent ID Path " + parentIdPath + " parent Id " + parentId + " Child Fields " + Arrays.asList(childFields) + " " +
-                            "child fields size " + childFields.length);
-                    //check if order fields is present new LinkedList<String>(Arrays.asList(split))
-                    String[] orderFields = (collectionOrders.containsKey(relationName)? collectionOrders.get(relationName) : new String[0]);
-                    List<GenericDTO> childDTOs = getChild((Class<T>) childClazz, childFields, parentIdPath, entity, orderFields, mappedByName);
-                    for (GenericDTO child : childDTOs) {
-                        dto.addRelation(relationName, child);
-                    }
-                } else {
-                    //we are cooked...
-                    throw new IllegalStateException(" type of collection is wrong ' " + type + "' ");
+                if (!(type instanceof ParameterizedType)) {
+                    throw new IllegalStateException("Wrong collection type '" + type + "'");  
+                }
+                ParameterizedType pType = (ParameterizedType) type;
+                Type arr = pType.getActualTypeArguments()[0];
+                Class<?> childClazz = (Class<?>) arr;
+                
+                if (childFields.length == 0) {
+                    LoggingUtil.log(this.getClass(), Level.DEBUG, "No child collection fields specified, get default list");
+                    childFields = genericDTOUtil.makeDefaultSelectionFields(childClazz);
+                    LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Defaulted fields [%s]", Arrays.asList(childFields)));
+                }
+                LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("RELATION FIELDS [%s], size [%s]", Arrays.asList(childFields), childFields.length));
+                
+                //ha, note that fieldType is a generic collection, we need the contained element
+                //Collection<GeoCity> ww....
+                //get the name of the corresponding @ManyToOne field on the child
+                //we now proceed to create the query for said child
+                final String parentClassName = entityClass.getSimpleName();
+                final String mappedByName = (relationField.isAnnotationPresent(OneToMany.class))? (relationField.getAnnotation(OneToMany.class)).mappedBy() : null;
+                final String parentIdPath = parentClassName.substring(0, 1).toLowerCase() + parentClassName.substring(1);
+                String parentId = (String) dto.get("id").getValue();
+                LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Child Class [%s], Parent ID Path [%s], parent Id: [%s], Child Fields [%s], child fields size: [%s]", childClazz.getName(), parentIdPath, parentId, Arrays.asList(childFields), childFields.length));
+                //check if order fields is present new LinkedList<String>(Arrays.asList(split))
+                String[] orderFields = (collectionOrders.containsKey(relationName)? collectionOrders.get(relationName) : new String[0]);
+                List<GenericDTO> childDTOs = getChild((Class<T>) childClazz, childFields, parentIdPath, entity, orderFields, mappedByName);
+                for (GenericDTO child : childDTOs) {
+                    dto.addRelation(relationName, child);
                 }
             }
         }
         return Response.ok(dto).build();
     }
 
+    private ReturnTuple<String, String[]> extractRelationNameAndFields(String collectionField){
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("CollectionField [%s]", collectionField));
+        int startIndex = collectionField.indexOf("(");
+        int endIndex = collectionField.lastIndexOf(")");
+        String relationName = collectionField.substring(0, startIndex);
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("RELATION NAME [%s]", relationName));
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("START INDEX [%s], END [%s]", startIndex, endIndex));
+        final String substring = collectionField.substring(startIndex + 1, endIndex);
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Substring [%s]", substring));
+        //id,index,name,wfTask:owner<firstName;lastName>
+        return new ReturnTuple<>(relationName, (StringUtils.isEmpty(substring)? new String[0] : substring.split(",")));
+    }
+
+    @SuppressWarnings("unchecked")
     private List<GenericDTO> getChild(Class<T> childClazz, String[] fields, String parentIdPath, T parent, String[] orderBy, String mappedByName) {
-        log.info("getting the children ,  childClazz " + childClazz.getSimpleName() + " fields " + Arrays.asList(fields) + " " +
-                " parentIdPath " + parentIdPath + " parent Id " + parent);
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("getting the children; childClazz [%s], fields: [%s], parentIdPath: [%s], parentId: [%s]", childClazz.getSimpleName(), Arrays.asList(fields), parentIdPath, parent));
         final CriteriaBuilder cb = getEntityManager().getCriteriaBuilder();
         final CriteriaQuery<Tuple> cq = cb.createTupleQuery();
         Root<T> root = cq.from(childClazz);
         List<Selection<?>> selections = getSelections(fields, root);
-        log.info("created selections size " + selections.size());
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Created selections size: [%s]", selections.size()));
         Predicate condition = null;
         String e = "";
-        try{
-            condition = cb.equal(root.get(parentIdPath), parent);
-        }catch (IllegalArgumentException ex){
-            //lets try find the referenced property in the parent
-            e = entityClass.getSuperclass().getSimpleName();
-            parentIdPath = e.substring(0, 1).toLowerCase() + e.substring(1);
-            try {
+
+        //first, try get the predicate condition from the mapped by
+        if(StringUtils.isNotEmpty(mappedByName)){
+            condition = cb.equal(root.get(mappedByName), parent);
+        }else{ 
+            try{
                 condition = cb.equal(root.get(parentIdPath), parent);
-            }catch (IllegalArgumentException ex2){
-                e = entityClass.getSuperclass().getSuperclass().getSimpleName();
+            }catch (IllegalArgumentException ex){
+                //lets try find the referenced property in the parent
+                ex.printStackTrace();
+                e = entityClass.getSuperclass().getSimpleName();
                 parentIdPath = e.substring(0, 1).toLowerCase() + e.substring(1);
-                try{
+                try {
                     condition = cb.equal(root.get(parentIdPath), parent);
-                }catch (IllegalArgumentException ex3){
-                    //try mapped by name
-                    if(StringUtils.isNotEmpty(mappedByName)){
-                        condition = cb.equal(root.get(mappedByName), parent);
+                }catch (IllegalArgumentException ex2){
+                    ex2.printStackTrace();
+                    e = entityClass.getSuperclass().getSuperclass().getSimpleName();
+                    parentIdPath = e.substring(0, 1).toLowerCase() + e.substring(1);
+                    try{
+                        condition = cb.equal(root.get(parentIdPath), parent);
+                    }catch (IllegalArgumentException ex3){
+                        ex3.printStackTrace();
                     }
                 }
             }
         }
+
+        if(condition == null){
+            throw new IllegalStateException("Could not create parent predicate condition from '" + childClazz + "' with path: '" + parentIdPath + "'");  
+        }
+        
         cq.multiselect(selections).where(condition);
         List<Order> od = getOrders(new LinkedList<>(Arrays.asList(orderBy)), cb, root, true);
         cq.orderBy(od);
         //execute query
         Query q = getEntityManager().createQuery(cq);
-        log.info(" max results " + 100);
-        //q.setMaxResults(100);
         List<Tuple> tupleResult = q.getResultList();
-        log.info("results obtained , size " + tupleResult.size());
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Results obtained, size %s", tupleResult.size()));
         //format the output
-        List<GenericDTO> dtos = Collections.EMPTY_LIST;
+        List<GenericDTO> dtos = Collections.emptyList();
         try {
             dtos = genericDTOUtil.getGenericDTOs(fields, tupleResult, childClazz);
         } catch (Exception ex) {
@@ -968,29 +983,29 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
     }
 
     @GET
+    @SuppressWarnings("unchecked")
     @javax.ws.rs.Path("/{id:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}}/collections/{collection_name}")
     @Produces(MediaType.APPLICATION_JSON)
     public Response getAllChildren(@Context UriInfo uriInfo,
                                    @PathParam("id") String id,
                                    @QueryParam("pageSize") @DefaultValue("10") int pageSize,
-                                   @QueryParam("page") @DefaultValue("1") int pageNum,
+                                   @QueryParam("page") @DefaultValue(DEFAULT_PAGE) int pageNum,
                                    @QueryParam("orderBy") @DefaultValue("id") List<String> orderBy,
                                    @QueryParam("fields") String fieldList,
                                    @PathParam("collection_name") String collectionName,
                                    @QueryParam("where") List<String> where
-    ) throws Exception {
-        log.info("the id " + id);
-        log.info(" order by " + orderBy);
-        log.info(" fields " + fieldList);
-        log.info("collection name " + collectionName);
+    ) {
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Parent id: [%s]", id));
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Order by: [%s]", orderBy));
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Fields %s", fieldList));
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Collection name: [%s]", collectionName));
 
         Field collectionField = Reflections.getField(entityClass, collectionName);
         if (collectionField == null) {
             Map<String, String> responseObj = new HashMap<>();
-            responseObj.put("error", "The collection field ' " + collectionName + " ' does not exist on the entity ' " + entityClass.getName() + "'");
+            responseObj.put(ERROR_NODE_NAME, "The collection field ' " + collectionName + " ' does not exist on the entity ' " + entityClass.getName() + "'");
             return Response.status(Response.Status.BAD_REQUEST).entity(responseObj).build();
         }
-        String sql = "select e." + collectionName + " from " + entityClass.getSimpleName() + " as e where e.id =:id";
         T entity = gService.find(id, entityClass);
         Type type = collectionField.getGenericType();
         Class<AbstractModelBase> clzz = null;
@@ -1002,11 +1017,9 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
         final String parentIdPath = entityClass.getSimpleName().substring(0, 1).toLowerCase() + entityClass.getSimpleName().substring(1);
         List<GenericDTO> dtos = getChild((Class<T>) clzz, fields, parentIdPath, entity, orderFields, mappedByName);
 
-        int numOfRecords = count(where, clzz);
+        long numOfRecords = count(where, (Class<T>) clzz);
         final Pager pager = new Pager(pageSize, pageNum, numOfRecords);
-        pager.setNumOfRecords(numOfRecords);
-        log.info(" pager " + pager);
-
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Pager [%s]", pager));
         serializePagingDetails(pager);
         return Response.ok().entity(dtos).build();
     }
@@ -1015,33 +1028,32 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
     @javax.ws.rs.Path("/{id:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
+    @SuppressWarnings("unchecked")
     public Response updateState(@Context HttpHeaders headers,
                                 @PathParam("id") String id,
                                 GenericDTO entityDTO) {
 
         List<Locale> acceptedLanguages = headers.getAcceptableLanguages();
-        log.info("==> Accepted languages " + acceptedLanguages);
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("==> Accepted languages [%s]", acceptedLanguages));
         if ((acceptedLanguages != null) && (!acceptedLanguages.isEmpty())) {
             interpolator.setDefaultLocale(acceptedLanguages.get(0));
         }
 
-        Response.ResponseBuilder builder = null;
+        Response.ResponseBuilder builder = Response.ok();
         //check if it exists
-        log.info("check if the entity exist ' " + entityClass + "'");
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Check if the entity exist [%s]", entityClass));
         T dbEntity = getEntityManager().find(entityClass, id);
         if (dbEntity == null) {
             throw new WebApplicationException(Response.Status.NOT_FOUND);
         }
 
-        log.info("Found the entity with id = '" + dbEntity.getId() + "'");
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Found the entity with id = '%s'", dbEntity.getId()));
 
         try {
-
             T entity = genericDTOUtil.fromDTO(entityDTO, entityClass);
-            log.info(" The  DTO ' " + entityDTO + " ' , entity from DTO ' " + entity + " ' ");
+            LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("The  DTO [%s], entity from DTO: [%s]", entityDTO, entity));
             entity = preUpdate(entity);
             validateEntity(entity);
-            extraValidations(entity);
 
             //process validation methods
             processValidationMethods(entity, ValidateAt.UPDATE);
@@ -1071,25 +1083,25 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
             e.printStackTrace();
             // Handle the manual validation exception violation
             Map<String, String> responseObj = new HashMap<>();
-            responseObj.put("error", e.getCause().getMessage());
+            responseObj.put(ERROR_NODE_NAME, e.getCause().getMessage());
             builder = Response.status(Response.Status.CONFLICT).entity(responseObj);
         } catch (InvocationTargetException ite){
             ite.printStackTrace();
             if(ite.getCause() instanceof ValidationException){
                 Map<String, String> responseObj = new HashMap<>();
-                responseObj.put("error", ite.getCause().getMessage());
+                responseObj.put(ERROR_NODE_NAME, ite.getCause().getMessage());
                 builder = Response.status(Response.Status.CONFLICT).entity(responseObj);
             }
         }catch (Exception e) {
             e.printStackTrace();
             if(e.getCause() instanceof ValidationException){
                 Map<String, String> responseObj = new HashMap<>();
-                responseObj.put("error", e.getCause().getMessage());
+                responseObj.put(ERROR_NODE_NAME, e.getCause().getMessage());
                 builder = Response.status(Response.Status.CONFLICT).entity(responseObj);
             }else {
                 // Handle generic exceptions
                 Map<String, String> responseObj = new HashMap<>();
-                responseObj.put("error", e.getMessage());
+                responseObj.put(ERROR_NODE_NAME, e.getMessage());
                 builder = Response.status(Response.Status.BAD_REQUEST).entity(responseObj);
             }
         }
@@ -1104,17 +1116,16 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     public Response createState(@Context HttpHeaders headers, GenericDTO entityDTO) {
-        Response.ResponseBuilder builder = null;
+        Response.ResponseBuilder builder = Response.ok();
 
         try {
             //make the entity from the dto
             T entity = genericDTOUtil.fromDTO(entityDTO, entityClass);
-            dumpEntity(entity);
             entity = preCreate(entity);
 
             // Validates entity using bean validation
             List<Locale> acceptedLanguages = headers.getAcceptableLanguages();
-            log.info("==> Accepted languages " + acceptedLanguages);
+            LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("==> Accepted languages [%s]", acceptedLanguages));
             if ((acceptedLanguages != null) && (!acceptedLanguages.isEmpty())) {
                 interpolator.setDefaultLocale(acceptedLanguages.get(0));
             }
@@ -1127,8 +1138,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
 
             T createdState = persist(entity);
 
-            log.info(" the PERSISTED entity " + createdState);
-
+            LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("The PERSISTED entity [%s]", createdState));
             Collection<String> fieldNames = GenericDTO.fieldNames(entityDTO);
             fieldNames.add("id");       //add the id field
             builder = Response.created(URI.create(uriInfo.getAbsolutePath() + "/" + createdState.getId().toString()))
@@ -1155,14 +1165,14 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
             ite.printStackTrace();
             if(ite.getCause() instanceof ValidationException){
                 Map<String, String> responseObj = new HashMap<>();
-                responseObj.put("error", ite.getCause().getMessage());
+                responseObj.put(ERROR_NODE_NAME, ite.getCause().getMessage());
                 builder = Response.status(Response.Status.CONFLICT).entity(responseObj);
             }
         } catch (Exception e) {
             e.printStackTrace();
             log.info(StackTraceUtil.getStackTrace(e));
             Map<String, String> responseObj = new HashMap<>();
-            responseObj.put("error", e.getMessage());
+            responseObj.put(ERROR_NODE_NAME, e.getMessage());
             builder = Response.status(Response.Status.BAD_REQUEST).entity(responseObj);
         }
 
@@ -1194,41 +1204,42 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
    * @throws IllegalAccessException
    * @throws InvocationTargetException
    */
+    @SuppressWarnings({"rawtypes", "unchecked"})
     protected void processValidationMethods(T entity, ValidateAt validateAt) throws IllegalAccessException, InvocationTargetException {
         //business logic validation
         List<Method> validationMethods = Reflections.getMethodsAnnotatedWith(entityClass, ValidationMethod.class);
-        log.info("Invoking validation methods on the entity '" + entityClass + "', validateAt : " + validateAt);
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Invoking validation methods on the entity '%s', validateAt: %s", entityClass, validateAt));
         for(Method m : validationMethods){
             //invoke them methods
-            System.out.println("Method " + m.getName());
+            LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Method %s", m.getName()));
             Set<ValidateAt> validateAts = new HashSet<>(Arrays.asList(m.getAnnotation(ValidationMethod.class).when()));
-            log.info("validateAts : " + validateAts);
+            LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("ValidateAts : %s", validateAts));
             if(m.getAnnotation(ValidationMethod.class).enabled()
                     && (validateAts.contains(validateAt) || validateAts.contains(ValidateAt.ALWAYS))) m.invoke(entity);
         }
         //validator class
         if(entityClass.isAnnotationPresent(ValidatorClass.class)){
             Class validatorClass = (entityClass.getDeclaredAnnotation(ValidatorClass.class)).value();
-            log.info("Running validations on the validator class : " + validatorClass);
-            Object validator = CDI.current().select(validatorClass).get();
-            //Object validator = getBean(validatorClass);
+            LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Running validations on the validator class: %s", validatorClass));
+            Object validatorObject = CDI.current().select(validatorClass).get();
             List<Method> validatorValidationMethods = Reflections.getMethodsAnnotatedWith(validatorClass, ValidationMethod.class);
             for(Method m : validatorValidationMethods){
                 //invoke them methods
                 Set<ValidateAt> validateAts = new HashSet<>(Arrays.asList(m.getAnnotation(ValidationMethod.class).when()));
                 if(m.getAnnotation(ValidationMethod.class).enabled()
-                        && (validateAts.contains(validateAt) || validateAts.contains(ValidateAt.ALWAYS))) m.invoke(validator, entity);
+                        && (validateAts.contains(validateAt) || validateAts.contains(ValidateAt.ALWAYS))) m.invoke(validatorObject, entity);
             }
         }
     }
 
+    @SuppressWarnings({"rawtypes", "unchecked"})
     protected void invokeEntityCallbacks(T entity, During when) throws InvocationTargetException, IllegalAccessException {
         //entity callbacks
         List<Method> callbackMethods = Reflections.getMethodsAnnotatedWith(entityClass, EntityCallbackMethod.class);
-        log.info("Invoking callback methods on the entity '" + entityClass + "', when : " + when);
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Invoking callback methods on the entity '%s', when: %s", entityClass, when));
         for(Method m : callbackMethods){
             //invoke them methods
-            System.out.println("Method " + m.getName());
+            LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Method %s", m.getName()));
             Set<During> validateAts = new HashSet<>(Arrays.asList(m.getAnnotation(EntityCallbackMethod.class).when()));
             if(m.getAnnotation(EntityCallbackMethod.class).enabled()
                     && (validateAts.contains(when) || validateAts.contains(During.ALWAYS))) m.invoke(entity);
@@ -1237,37 +1248,20 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
         if(entityClass.isAnnotationPresent(EntityCallbackClass.class)){
             log.info("(entityClass.getDeclaredAnnotation(EntityCallbackClass.class)) : " + (entityClass.getAnnotation(EntityCallbackClass.class)));
             Class callbackClass = (entityClass.getAnnotation(EntityCallbackClass.class)).value();
-            log.info("Running callbacks on the callback class : " + callbackClass);
-            Object validator = CDI.current().select(callbackClass).get();
-            //Object validator = getBean(validatorClass);
+            LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Running callbacks on the callback class: %s", callbackClass));
+            Object callbackObject = CDI.current().select(callbackClass).get();
             List<Method> validatorValidationMethods = Reflections.getMethodsAnnotatedWith(callbackClass, EntityCallbackMethod.class);
             for(Method m : validatorValidationMethods){
                 //invoke them methods
                 Set<During> validateAts = new HashSet<>(Arrays.asList(m.getAnnotation(EntityCallbackMethod.class).when()));
                 if(m.getAnnotation(EntityCallbackMethod.class).enabled()
-                        && (validateAts.contains(when) || validateAts.contains(ValidateAt.ALWAYS))) m.invoke(validator, entity);
+                        && (validateAts.contains(when) || validateAts.contains(During.ALWAYS))) m.invoke(callbackObject, entity);
             }
         }
     }
 
-
-    protected void dumpEntity(T entity) {
-        /*XStream xstream = new XStream(new Sun14ReflectionProvider(
-                new FieldDictionary(new ImmutableFieldKeySorter())),
-                new DomDriver("utf-8"));
-        log.info(xstream.toXML(entity));*/
-
-       /* XStream xstream = new XStream(new JsonHierarchicalStreamDriver() {
-            public HierarchicalStreamWriter createWriter(Writer writer) {
-                return new JsonWriter(writer, JsonWriter.DROP_ROOT_MODE);
-            }
-        });
-
-        log.info(xstream.toXML(entity));*/
-    }
-
     /**
-     * TODO
+     * TODO1
      * when u post an entity with @manyToOne relationship,
      * and said children don't exists in the db (i.e don't hav id in the json)
      * ...i need to detect that and persist the children and then the parent
@@ -1278,7 +1272,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
      * @throws Exception
      */
     protected T persist(T entity) throws Exception {
-        log.info(" persist the entity " + entity);
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Persist the entity: %s", entity));
         return gService.makePersistent(entity);
     }
 
@@ -1300,26 +1294,10 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
      *          If member with the same email already exists
      */
     protected void validateEntity(T state) throws ValidationException {
-
         Set<ConstraintViolation<T>> violations = validator.validate(state);
-
         if (!violations.isEmpty()) {
-            throw new ConstraintViolationException(new HashSet<ConstraintViolation<?>>(violations));
+            throw new ConstraintViolationException(new HashSet<>(violations));
         }
-
-    }
-
-    /**
-     * <p>
-     * @Deprecated(prefer to use @ValidationMethod and @ValidatorClass)
-     * Subclasses may choose to add extra validations by overriding this method.
-     * </p>
-     *
-     * @param entity the entity for further validations
-     */
-    @Deprecated
-    protected void extraValidations(T entity) {
-        //see subclass
     }
 
     /**
@@ -1330,8 +1308,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
      * @return JAX-RS response containing all violations
      */
     protected Response.ResponseBuilder createViolationResponse(Set<ConstraintViolation<?>> constraintViolations) {
-        log.info("Validation completed. violations found: " + constraintViolations.size());
-
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Validation completed. violations found: %s", constraintViolations.size()));
         Map<String, String> violations = new HashMap<>();
 
         for (ConstraintViolation<?> violation : constraintViolations) {
@@ -1339,8 +1316,8 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
         }
 
         //return
-        BaseResponse response = new ValidationErrorResponse("Validation errors occurred. details for more information", violations);
-        return Response.status(response.getHttpStatus()).entity(response);
+        BaseResponse res = new ValidationErrorResponse("Validation errors occurred. details for more information", violations);
+        return Response.status(res.getHttpStatus()).entity(res);
     }
 
     /**
@@ -1352,7 +1329,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
      * @return JAX-RS response containing all violations
      */
     protected Response.ResponseBuilder createSuccessResponse(int httpStatus, String message) {
-        log.info("Message: " + message);
+        LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("Message: %s", message));
         return Response.status(httpStatus).entity(new SuccessResponse(httpStatus, 1000, message));
     }
 
@@ -1394,5 +1371,24 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
         public T getEntity() {
             return entity;
         }
+    }
+}
+
+class ReturnTuple<S, T> {
+
+    private final S first;
+    private final T second;
+
+    public ReturnTuple(S first, T second) {
+        this.first = first;
+        this.second = second;
+    }
+
+    public S getFirst() {
+        return first;
+    }
+
+    public T getSecond() {
+        return second;
     }
 }
