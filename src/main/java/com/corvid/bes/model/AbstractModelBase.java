@@ -16,7 +16,7 @@ import java.util.Date;
 public abstract class AbstractModelBase {
 
     @Id
-    //@GeneratedValue(generator = "lemrUUIDGenerator")
+    @GeneratedValue(generator = "base32UUIDGenerator")
     @Column(name = "id")
     protected String id;
 
