@@ -79,6 +79,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.UriInfo;
+import javax.ws.rs.core.Response.Status;
 
 import org.apache.commons.lang.StringUtils;
 import org.hibernate.Session;
@@ -211,12 +212,15 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
     }
 
     @DELETE
-    @javax.ws.rs.Path("/{id:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}}")
+    @javax.ws.rs.Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     public Response delete(@PathParam("id") String id) {
         Response.ResponseBuilder builder = null;
         T entity = gService.find(id, entityClass);
+        if(entity == null){
+            return Response.status(Status.NOT_FOUND).build();
+        }
         try {
             //perform validator validation
             processValidationMethods(entity, ValidateAt.DELETE);
