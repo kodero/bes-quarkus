@@ -1154,7 +1154,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
 
             //entity callbacks before create
             entityManager.flush();
-            invokeEntityCallbacks(entity, During.AFTER_CREATE);
+            invokeEntityCallbacks(createdState, During.AFTER_CREATE);
         } catch (ConstraintViolationException ce) {
             ce.printStackTrace();
             // Handle bean validation issues
