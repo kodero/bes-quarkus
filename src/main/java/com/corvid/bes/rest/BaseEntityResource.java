@@ -256,7 +256,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
     }
 
     @DELETE
-    @javax.ws.rs.Path("/{id:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}}/collections/{collectionName}/{itemId:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}}/remove")
+    @javax.ws.rs.Path("/{id}/collections/{collectionName}/{itemId}/remove")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     public Response deleteChild(@PathParam("id") String id, @PathParam("collectionName") String collectionName, @PathParam("itemId") String itemId) {
@@ -805,7 +805,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
      * @return
      */
     @GET
-    @javax.ws.rs.Path("/{id:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}}")
+    @javax.ws.rs.Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @SuppressWarnings("unchecked")
     public Response getSingleInstance(@Context UriInfo uriInfo,
@@ -988,7 +988,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
 
     @GET
     @SuppressWarnings("unchecked")
-    @javax.ws.rs.Path("/{id:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}}/collections/{collection_name}")
+    @javax.ws.rs.Path("/{id}/collections/{collection_name}")
     @Produces(MediaType.APPLICATION_JSON)
     public Response getAllChildren(@Context UriInfo uriInfo,
                                    @PathParam("id") String id,
@@ -1029,13 +1029,11 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
     }
 
     @POST
-    @javax.ws.rs.Path("/{id:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}}")
+    @javax.ws.rs.Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     @SuppressWarnings("unchecked")
-    public Response updateState(@Context HttpHeaders headers,
-                                @PathParam("id") String id,
-                                GenericDTO entityDTO) {
+    public Response updateState(@Context HttpHeaders headers, @PathParam("id") String id, GenericDTO entityDTO) {
 
         List<Locale> acceptedLanguages = headers.getAcceptableLanguages();
         LoggingUtil.log(this.getClass(), Level.DEBUG, String.format("==> Accepted languages [%s]", acceptedLanguages));
