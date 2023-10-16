@@ -2,7 +2,7 @@ package com.corvid.bes.i18n;
 
 import com.corvid.genericdto.data.gdto.GenericDTO;
 
-import javax.persistence.*;
+import jakarta.persistence.*;
 
 @Entity
 @NamedQueries({

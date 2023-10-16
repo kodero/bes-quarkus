@@ -6,10 +6,10 @@ import com.corvid.genericdto.util.LoggingUtil;
 import org.hibernate.Session;
 import org.jboss.logging.Logger.Level;
 
-//import javax.ejb.Stateless;
-import javax.enterprise.context.RequestScoped;
-import javax.persistence.*;
-import javax.transaction.Transactional;
+//import jakarta.ejb.Stateless;
+import jakarta.enterprise.context.RequestScoped;
+import jakarta.persistence.*;
+import jakarta.transaction.Transactional;
 
 import java.lang.reflect.Field;
 import java.util.Arrays;
@@ -74,7 +74,7 @@ public class GService {
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     public <T> List<T> findAll(Class entityClass) {
-        javax.persistence.criteria.CriteriaQuery<T> cq = getEntityManager().getCriteriaBuilder().createQuery(entityClass);
+        jakarta.persistence.criteria.CriteriaQuery<T> cq = getEntityManager().getCriteriaBuilder().createQuery(entityClass);
         cq.select(cq.from(entityClass));
         return getEntityManager().createQuery(cq).getResultList();
     }

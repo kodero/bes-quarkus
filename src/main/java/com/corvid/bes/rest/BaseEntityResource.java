@@ -37,49 +37,48 @@ import java.net.URI;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.logging.Logger;
-import javax.annotation.PostConstruct;
-import javax.enterprise.context.RequestScoped;
-import javax.enterprise.event.Event;
-import javax.enterprise.inject.spi.CDI;
-import javax.inject.Inject;
-import javax.persistence.EntityManager;
-import javax.persistence.OneToMany;
-import javax.persistence.PersistenceContext;
-import javax.persistence.Query;
-import javax.persistence.Tuple;
-import javax.persistence.TypedQuery;
-import javax.persistence.criteria.CriteriaBuilder;
-import javax.persistence.criteria.CriteriaQuery;
-import javax.persistence.criteria.Expression;
-import javax.persistence.criteria.Join;
-import javax.persistence.criteria.JoinType;
-import javax.persistence.criteria.Order;
-import javax.persistence.criteria.Path;
-import javax.persistence.criteria.Predicate;
-import javax.persistence.criteria.Root;
-import javax.persistence.criteria.Selection;
-import javax.transaction.Transactional;
-import javax.validation.ConstraintViolation;
-import javax.validation.ConstraintViolationException;
-import javax.validation.Validation;
-import javax.validation.ValidationException;
-import javax.validation.Validator;
-import javax.ws.rs.Consumes;
-import javax.ws.rs.DELETE;
-import javax.ws.rs.DefaultValue;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.WebApplicationException;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriInfo;
-import javax.ws.rs.core.Response.Status;
+import jakarta.annotation.PostConstruct;
+import jakarta.enterprise.context.RequestScoped;
+import jakarta.enterprise.event.Event;
+import jakarta.enterprise.inject.spi.CDI;
+import jakarta.inject.Inject;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.PersistenceContext;
+import jakarta.persistence.Query;
+import jakarta.persistence.Tuple;
+import jakarta.persistence.TypedQuery;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Expression;
+import jakarta.persistence.criteria.Join;
+import jakarta.persistence.criteria.JoinType;
+import jakarta.persistence.criteria.Order;
+import jakarta.persistence.criteria.Path;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Selection;
+import jakarta.transaction.Transactional;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.ConstraintViolationException;
+import jakarta.validation.Validation;
+import jakarta.validation.ValidationException;
+import jakarta.validation.Validator;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.DefaultValue;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
+import jakarta.ws.rs.core.Response.Status;
 
 import org.apache.commons.lang.StringUtils;
 import org.hibernate.Session;
@@ -93,7 +92,7 @@ import org.jboss.logging.Logger.Level;
  * </p>
  * <p/>
  * <p>
- * Subclasses will declare a base path using the JAX-RS {@link javax.ws.rs.Path} annotation, for example:
+ * Subclasses will declare a base path using the JAX-RS {@link jakarta.ws.rs.Path} annotation, for example:
  * </p>
  * <p/>
  * <pre>
@@ -207,12 +206,12 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
         interpolator = new LocaleAwareMessageInterpolator();
         //set the headers
 
-        javax.validation.Configuration<?> configuration = Validation.byDefaultProvider().configure();
+        jakarta.validation.Configuration<?> configuration = Validation.byDefaultProvider().configure();
         this.validator = configuration.messageInterpolator(interpolator).buildValidatorFactory().getValidator();
     }
 
     @DELETE
-    @javax.ws.rs.Path("/{id}")
+    @jakarta.ws.rs.Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     public Response delete(@PathParam("id") String id) {
@@ -256,7 +255,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
     }
 
     @DELETE
-    @javax.ws.rs.Path("/{id}/collections/{collectionName}/{itemId}/remove")
+    @jakarta.ws.rs.Path("/{id}/collections/{collectionName}/{itemId}/remove")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     public Response deleteChild(@PathParam("id") String id, @PathParam("collectionName") String collectionName, @PathParam("itemId") String itemId) {
@@ -491,7 +490,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
      * @return
      */
     @GET
-    @javax.ws.rs.Path("/count")
+    @jakarta.ws.rs.Path("/count")
     @Produces(MediaType.APPLICATION_JSON)
     public Map<String, Long> getCount(@Context UriInfo uriInfo, @QueryParam("where") List<String> where) {
         long count  = count(where, entityClass);
@@ -501,7 +500,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
     }
 
     @GET
-    @javax.ws.rs.Path("/summaries/{_function}/{field}")
+    @jakarta.ws.rs.Path("/summaries/{_function}/{field}")
     @Produces(MediaType.APPLICATION_JSON)
     public Map<String, BigDecimal> getSummary(@Context UriInfo uriInfo, @QueryParam("where") List<String> where, @PathParam("_function") String function, @PathParam("field") String field) {
         CriteriaBuilder criteriaBuilder = getEntityManager().getCriteriaBuilder();
@@ -805,7 +804,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
      * @return
      */
     @GET
-    @javax.ws.rs.Path("/{id}")
+    @jakarta.ws.rs.Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @SuppressWarnings("unchecked")
     public Response getSingleInstance(@Context UriInfo uriInfo,
@@ -988,7 +987,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
 
     @GET
     @SuppressWarnings("unchecked")
-    @javax.ws.rs.Path("/{id}/collections/{collection_name}")
+    @jakarta.ws.rs.Path("/{id}/collections/{collection_name}")
     @Produces(MediaType.APPLICATION_JSON)
     public Response getAllChildren(@Context UriInfo uriInfo,
                                    @PathParam("id") String id,
@@ -1029,7 +1028,7 @@ public abstract class BaseEntityResource<T extends AbstractModelBase> {
     }
 
     @POST
-    @javax.ws.rs.Path("/{id}")
+    @jakarta.ws.rs.Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     @SuppressWarnings("unchecked")

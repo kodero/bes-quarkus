@@ -2,9 +2,8 @@ package com.corvid.bes.i18n;
 
 import com.corvid.bes.service.GService;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
-import javax.persistence.EntityManager;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
